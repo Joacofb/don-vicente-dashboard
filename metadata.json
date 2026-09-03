@@ -1,0 +1,8 @@
+{
+  "name": "DON VICENTE Dashboard",
+  "description": "Dashboard y control diario de ventas, gastos y reportes financieros para Don Vicente.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
