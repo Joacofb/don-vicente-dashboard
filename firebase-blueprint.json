@@ -1,0 +1,188 @@
+{
+  "entities": {
+    "Record": {
+      "title": "Record",
+      "description": "Registro financiero de venta o gasto del comercio",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único de la transacción"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["sale", "expense"],
+          "description": "Tipo de movimiento: venta o gasto"
+        },
+        "date": {
+          "type": "string",
+          "description": "Fecha del movimiento en formato YYYY-MM-DD"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Monto monetario de la transacción"
+        },
+        "category": {
+          "type": "string",
+          "description": "Categoría contable de la transacción"
+        },
+        "description": {
+          "type": "string",
+          "description": "Concepto o descripción detallada"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Medio de pago utilizado"
+        },
+        "entityName": {
+          "type": "string",
+          "description": "Nombre de cliente o proveedor"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Observaciones adicionales"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Fecha y hora ISO de creación"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "ID del usuario creador"
+        },
+        "createdByName": {
+          "type": "string",
+          "description": "Nombre del usuario creador"
+        },
+        "lastEditedAt": {
+          "type": "string",
+          "description": "Fecha y hora ISO de última edición"
+        },
+        "lastEditedBy": {
+          "type": "string",
+          "description": "ID del usuario que editó"
+        },
+        "lastEditedByName": {
+          "type": "string",
+          "description": "Nombre del usuario que editó"
+        },
+        "editCount": {
+          "type": "number",
+          "description": "Cantidad de modificaciones realizadas"
+        },
+        "editReason": {
+          "type": "string",
+          "description": "Motivo de la edición"
+        }
+      },
+      "required": ["id", "type", "date", "amount", "category", "description", "paymentMethod", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Usuario del sistema con rol y credenciales de acceso",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único del usuario"
+        },
+        "name": {
+          "type": "string",
+          "description": "Nombre completo o identificador del usuario"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "operator"],
+          "description": "Rol jerárquico del usuario"
+        },
+        "roleLabel": {
+          "type": "string",
+          "description": "Etiqueta visible del rol o puesto"
+        },
+        "avatarColor": {
+          "type": "string",
+          "description": "Clase de color para el avatar"
+        },
+        "description": {
+          "type": "string",
+          "description": "Descripción de responsabilidades o notas"
+        },
+        "pin": {
+          "type": "string",
+          "description": "PIN de acceso numérico opcional"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Inicial o símbolo del avatar"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Fecha y hora de creación"
+        }
+      },
+      "required": ["id", "name", "role", "roleLabel", "avatarColor"]
+    },
+    "RecordMessage": {
+      "title": "RecordMessage",
+      "description": "Mensaje interno o consulta entre usuarios vinculado a un registro financiero",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único del mensaje"
+        },
+        "recordId": {
+          "type": "string",
+          "description": "ID del registro de transacción referenciado"
+        },
+        "senderId": {
+          "type": "string",
+          "description": "ID del usuario remitente"
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Nombre del usuario remitente"
+        },
+        "recipientId": {
+          "type": "string",
+          "description": "ID del usuario destinatario"
+        },
+        "recipientName": {
+          "type": "string",
+          "description": "Nombre del usuario destinatario"
+        },
+        "messageText": {
+          "type": "string",
+          "description": "Contenido del mensaje o consulta"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Fecha y hora ISO de envío"
+        },
+        "read": {
+          "type": "boolean",
+          "description": "Indica si el mensaje ya fue leído por el destinatario"
+        },
+        "recordSummary": {
+          "type": "object",
+          "description": "Resumen contextual del registro referenciado"
+        }
+      },
+      "required": ["id", "recordId", "senderId", "senderName", "recipientId", "recipientName", "messageText", "createdAt", "read"]
+    }
+  },
+  "firestore": {
+    "/records/{recordId}": {
+      "schema": "Record",
+      "description": "Colección de registros de transacciones financieras del comercio"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Colección de usuarios y roles del sistema"
+    },
+    "/record_messages/{messageId}": {
+      "schema": "RecordMessage",
+      "description": "Colección de mensajes internos y consultas entre usuarios vinculados a registros"
+    }
+  }
+}

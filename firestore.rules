@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isValidRecord(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.type in ['sale', 'expense']
+        && data.date is string && data.date.size() == 10
+        && data.amount is number && data.amount >= 0
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+        && data.description is string && data.description.size() > 0 && data.description.size() <= 300
+        && data.paymentMethod is string
+        && data.createdAt is string;
+    }
+
+    function isValidUser(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.role in ['admin', 'operator'];
+    }
+
+    function isValidMessage(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.recordId is string && data.recordId.size() > 0 && data.recordId.size() <= 128
+        && data.senderId is string && data.senderId.size() > 0
+        && data.recipientId is string && data.recipientId.size() > 0
+        && data.messageText is string && data.messageText.size() > 0 && data.messageText.size() <= 2000
+        && data.createdAt is string
+        && data.read is bool;
+    }
+
+    match /records/{recordId} {
+      allow read: if true;
+      allow create, update: if isValidId(recordId) && isValidRecord(request.resource.data);
+      allow delete: if isValidId(recordId);
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isValidId(userId) && isValidUser(request.resource.data);
+      allow delete: if isValidId(userId);
+    }
+
+    match /record_messages/{messageId} {
+      allow read: if true;
+      allow create, update: if isValidId(messageId) && isValidMessage(request.resource.data);
+      allow delete: if isValidId(messageId);
+    }
+  }
+}

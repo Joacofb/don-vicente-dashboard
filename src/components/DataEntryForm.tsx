@@ -19,7 +19,10 @@ import {
   Upload,
   ChevronDown,
   Edit3,
-  Clock
+  Clock,
+  Repeat,
+  MessageSquare,
+  Eye
 } from 'lucide-react';
 import { 
   FinancialRecord, 
@@ -34,27 +37,42 @@ import { SavedItem } from '../data/savedItemsData';
 import { getTodayString, formatDateISO, parseDate, formatDisplayDate } from '../utils/dateUtils';
 import { formatCurrency, generateWeeklyReport } from '../utils/financeUtils';
 
+export interface DirectTransferPayload {
+  concept: string;
+  amount: number;
+  date: string;
+  clientName: string;
+  providerName: string;
+  notes?: string;
+}
+
 interface DataEntryFormProps {
   onAddRecord: (record: Omit<FinancialRecord, 'id' | 'createdAt'>) => void;
+  onAddDirectTransfer?: (payload: DirectTransferPayload) => void | Promise<void>;
+  onOpenInquiry?: (record: FinancialRecord) => void;
   currencySymbol: string;
   recentRecords: FinancialRecord[];
   onDeleteRecord: (id: string) => void;
   onEditRecord?: (record: FinancialRecord) => void;
+  onViewRecord?: (record: FinancialRecord) => void;
   currentUser: AppUser;
   savedConcepts?: SavedItem[];
   savedEntities?: SavedItem[];
-  onRecordConcept?: (name: string, type: 'sale' | 'expense') => void;
-  onRecordEntity?: (name: string, type: 'sale' | 'expense') => void;
+  onRecordConcept?: (name: string, type: 'sale' | 'expense' | 'both') => void;
+  onRecordEntity?: (name: string, type: 'sale' | 'expense' | 'both') => void;
   onOpenCatalogModal: () => void;
   onOpenImportModal: () => void;
 }
 
 export const DataEntryForm: React.FC<DataEntryFormProps> = ({
   onAddRecord,
+  onAddDirectTransfer,
+  onOpenInquiry,
   currencySymbol,
   recentRecords = [],
   onDeleteRecord,
   onEditRecord,
+  onViewRecord,
   currentUser,
   savedConcepts = [],
   savedEntities = [],
@@ -63,6 +81,7 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
   onOpenCatalogModal,
   onOpenImportModal,
 }) => {
+  const [entryMode, setEntryMode] = useState<'sale' | 'expense' | 'transfer'>('sale');
   const [type, setType] = useState<TransactionType>('sale');
   const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState<string>(getTodayString());
@@ -78,6 +97,12 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
   const [showConceptSuggestions, setShowConceptSuggestions] = useState<boolean>(false);
   const [showEntitySuggestions, setShowEntitySuggestions] = useState<boolean>(false);
 
+  // Estados específicos para Transferencia Directa (Cliente -> Proveedor)
+  const [transferClientName, setTransferClientName] = useState<string>('');
+  const [transferProviderName, setTransferProviderName] = useState<string>('');
+  const [showTransferClientSuggestions, setShowTransferClientSuggestions] = useState<boolean>(false);
+  const [showTransferProviderSuggestions, setShowTransferProviderSuggestions] = useState<boolean>(false);
+
   const isAdmin = currentUser.role === 'admin';
   const availableCategories = type === 'sale' ? DEFAULT_SALE_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
 
@@ -86,11 +111,20 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
 
   // Filtrar sugerencias relevantes para el tipo actual
   const relevantConcepts = safeConcepts
-    .filter(c => c && (c.type === 'both' || c.type === type))
+    .filter(c => c && (c.type === 'both' || c.type === (entryMode === 'transfer' ? 'both' : type)))
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 
   const relevantEntities = safeEntities
     .filter(e => e && (e.type === 'both' || e.type === type))
+    .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
+
+  // Entidades para transferencias directas
+  const clientEntities = safeEntities
+    .filter(e => e && (e.type === 'both' || e.type === 'sale'))
+    .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
+
+  const providerEntities = safeEntities
+    .filter(e => e && (e.type === 'both' || e.type === 'expense'))
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 
   // Filtrar según lo que el usuario va escribiendo
@@ -100,6 +134,14 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
 
   const filteredEntities = relevantEntities.filter(e => 
     e && (!entityName.trim() || e.name.toLowerCase().includes(entityName.toLowerCase()))
+  );
+
+  const filteredTransferClients = clientEntities.filter(e =>
+    e && (!transferClientName.trim() || e.name.toLowerCase().includes(transferClientName.toLowerCase()))
+  );
+
+  const filteredTransferProviders = providerEntities.filter(e =>
+    e && (!transferProviderName.trim() || e.name.toLowerCase().includes(transferProviderName.toLowerCase()))
   );
 
   const handleTypeChange = (newType: TransactionType) => {
@@ -123,6 +165,83 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
+      return;
+    }
+
+    // FLUJO ESPECIAL: Transferencia Directa (Cliente -> Proveedor)
+    if (entryMode === 'transfer') {
+      const trimmedClient = transferClientName.trim();
+      const trimmedProvider = transferProviderName.trim();
+      if (!trimmedClient || !trimmedProvider) {
+        return;
+      }
+
+      const trimmedDesc = description.trim();
+
+      if (onRecordEntity) {
+        onRecordEntity(trimmedClient, 'sale');
+        onRecordEntity(trimmedProvider, 'expense');
+      }
+      if (trimmedDesc && onRecordConcept) {
+        onRecordConcept(trimmedDesc, 'both');
+      }
+
+      if (onAddDirectTransfer) {
+        onAddDirectTransfer({
+          concept: trimmedDesc || `Transferencia de ${trimmedClient} a ${trimmedProvider}`,
+          amount: numAmount,
+          date,
+          clientName: trimmedClient,
+          providerName: trimmedProvider,
+          notes: notes.trim() || undefined,
+        });
+      } else {
+        // Fallback en caso de no proveer handler específico
+        const transferGroupId = `tr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        onAddRecord({
+          type: 'sale',
+          amount: numAmount,
+          date,
+          category: 'Transferencia Directa',
+          paymentMethod: 'direct_transfer',
+          description: trimmedDesc ? `[Transferencia] ${trimmedDesc} (Cliente: ${trimmedClient})` : `Transferencia de ${trimmedClient} hacia ${trimmedProvider}`,
+          entityName: trimmedClient,
+          linkedEntityName: trimmedProvider,
+          transferGroupId,
+          transferRole: 'origin_sale',
+          notes: notes.trim() || undefined,
+          createdBy: currentUser.id,
+          createdByName: currentUser.name,
+        });
+        onAddRecord({
+          type: 'expense',
+          amount: numAmount,
+          date,
+          category: 'Transferencia Directa',
+          paymentMethod: 'direct_transfer',
+          description: trimmedDesc ? `[Transferencia] ${trimmedDesc} (Proveedor: ${trimmedProvider})` : `Transferencia hacia ${trimmedProvider} desde ${trimmedClient}`,
+          entityName: trimmedProvider,
+          linkedEntityName: trimmedClient,
+          transferGroupId,
+          transferRole: 'destination_expense',
+          notes: notes.trim() || undefined,
+          createdBy: currentUser.id,
+          createdByName: currentUser.name,
+        });
+      }
+
+      setLastAddedAmount(numAmount);
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 3000);
+
+      setAmount('');
+      setDescription('');
+      setTransferClientName('');
+      setTransferProviderName('');
+      setNotes('');
+      setShowConceptSuggestions(false);
+      setShowTransferClientSuggestions(false);
+      setShowTransferProviderSuggestions(false);
       return;
     }
 
@@ -152,6 +271,7 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
       notes: notes.trim() || undefined,
       createdBy: currentUser.id,
       createdByName: currentUser.name,
+      reviewStatus: 'sin_asignar',
     });
 
     setLastAddedAmount(numAmount);
@@ -222,41 +342,85 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
               </div>
             </div>
 
-            {/* Fila 2: Selector Segmentado de Tipo de Registro (Ingreso / Venta vs Gasto / Salida) en ancho completo */}
+            {/* Fila 2: Selector Segmentado de Tipo de Registro (Ingreso / Gasto / Transferencia Directa) */}
             <div className="bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/70">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                 <button
                   type="button"
                   id="btn-select-sale"
-                  onClick={() => handleTypeChange('sale')}
-                  className={`py-2.5 sm:py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                    type === 'sale'
+                  onClick={() => {
+                    setEntryMode('sale');
+                    handleTypeChange('sale');
+                  }}
+                  className={`py-2.5 px-3 rounded-xl text-xs sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    entryMode === 'sale'
                       ? 'bg-white shadow-xs text-emerald-700 border border-emerald-100'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-white/50 font-medium'
                   }`}
                 >
-                  <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 ${type === 'sale' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                  <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 ${entryMode === 'sale' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
                     <ArrowUpRight className="w-3.5 h-3.5" />
                   </div>
                   <span>Ingreso / Venta</span>
                 </button>
+
                 <button
                   type="button"
                   id="btn-select-expense"
-                  onClick={() => handleTypeChange('expense')}
-                  className={`py-2.5 sm:py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                    type === 'expense'
+                  onClick={() => {
+                    setEntryMode('expense');
+                    handleTypeChange('expense');
+                  }}
+                  className={`py-2.5 px-3 rounded-xl text-xs sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    entryMode === 'expense'
                       ? 'bg-white shadow-xs text-rose-700 border border-rose-100'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-white/50 font-medium'
                   }`}
                 >
-                  <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 ${type === 'expense' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-500'}`}>
+                  <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 ${entryMode === 'expense' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-500'}`}>
                     <ArrowDownRight className="w-3.5 h-3.5" />
                   </div>
                   <span>Gasto / Salida</span>
                 </button>
+
+                <button
+                  type="button"
+                  id="btn-select-transfer"
+                  onClick={() => {
+                    setEntryMode('transfer');
+                    setIsAddingCustomCategory(false);
+                  }}
+                  className={`py-2.5 px-3 rounded-xl text-xs sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    entryMode === 'transfer'
+                      ? 'bg-white shadow-xs text-purple-700 border border-purple-100'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/50 font-medium'
+                  }`}
+                >
+                  <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 ${entryMode === 'transfer' ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-500'}`}>
+                    <Repeat className="w-3.5 h-3.5" />
+                  </div>
+                  <span>Transferencia Directa</span>
+                </button>
               </div>
             </div>
+
+            {/* Banner Informativo si está en modo Transferencia Directa */}
+            {entryMode === 'transfer' && (
+              <div className="p-3.5 bg-purple-50/80 border border-purple-200 rounded-2xl flex items-start gap-3 text-purple-900 animate-in fade-in">
+                <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 mt-0.5">
+                  <Repeat className="w-4 h-4" />
+                </div>
+                <div className="text-xs leading-relaxed">
+                  <span className="font-bold block text-purple-950 text-xs mb-0.5">
+                    Movimiento Entre Cuentas (Cliente → Proveedor)
+                  </span>
+                  <p className="text-purple-800/90 text-[11px]">
+                    Esta acción crea en una misma operación <strong>1 Ingreso</strong> a nombre del Cliente y <strong>1 Gasto/Egreso</strong> por el mismo monto hacia el Proveedor, ambos enlazados con medio de pago <em>"Transferencia Directa"</em>. 
+                    El balance global queda equilibrado (impacto neto en caja: $0.00).
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Fila 1: Monto y Fecha */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -339,7 +503,9 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
               </div>
             </div>
 
-            {/* Fila 2: Categoría y Método de Pago */}
+            {entryMode !== 'transfer' ? (
+              <>
+                {/* Fila 2: Categoría y Método de Pago */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               {/* Categoría */}
               <div>
@@ -622,6 +788,305 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
                 <span>Registrar Transacción</span>
               </button>
             </div>
+          </>
+        ) : (
+          /* MODO TRANSFERENCIA DIRECTA (CLIENTE -> PROVEEDOR) */
+          <div className="space-y-6 animate-in fade-in">
+            {/* Concepto General */}
+            <div className="relative">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Concepto General / Motivo</span>
+                  <span className="text-slate-400 font-normal lowercase">(compartido)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={onOpenCatalogModal}
+                  className="text-[11px] font-bold text-purple-600 hover:text-purple-800 flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Bookmark className="w-3 h-3" />
+                  <span>Ver Catálogo</span>
+                </button>
+              </div>
+
+              <div className="relative">
+                <input
+                  id="input-transfer-description"
+                  type="text"
+                  placeholder="Ej: Pago directo de factura, Liquidación de insumos por cuenta de terceros..."
+                  value={description}
+                  onFocus={() => setShowConceptSuggestions(true)}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    setShowConceptSuggestions(true);
+                  }}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-purple-500 outline-none text-sm font-medium text-slate-800 bg-white"
+                />
+                {description && (
+                  <button
+                    type="button"
+                    onClick={() => setDescription('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs px-1.5 py-0.5 rounded-md hover:bg-slate-100"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Sugerencias Rápidas de Conceptos */}
+              {relevantConcepts.length > 0 && (
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-2.5 h-2.5 text-purple-500" /> Sugeridos:
+                  </span>
+                  {relevantConcepts.slice(0, 4).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setDescription(c.name);
+                        setShowConceptSuggestions(false);
+                      }}
+                      className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                        description === c.name 
+                          ? 'bg-purple-600 text-white border-purple-600 shadow-xs' 
+                          : 'bg-slate-50 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200/80 hover:border-purple-200'
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Dropdown sugerencias concepto */}
+              {showConceptSuggestions && filteredConcepts.length > 0 && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowConceptSuggestions(false)} />
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl z-20 max-h-52 overflow-y-auto p-1.5 animate-in fade-in">
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                      Conceptos Registrados
+                    </div>
+                    {filteredConcepts.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setDescription(item.name);
+                          setShowConceptSuggestions(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-purple-50 hover:text-purple-800 text-slate-800 rounded-xl transition-colors flex items-center justify-between group cursor-pointer"
+                      >
+                        <span className="truncate">{item.name}</span>
+                        <span className="text-[10px] text-slate-400 group-hover:text-purple-600 font-normal">
+                          {item.usageCount > 1 ? `${item.usageCount} usos` : 'Guardado'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Cliente Origen y Proveedor Destino */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              {/* CLIENTE (ORIGEN) */}
+              <div className="relative">
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span className="text-emerald-700 font-bold">Cliente (Origen / Ingreso) *</span>
+                </label>
+
+                <div className="relative">
+                  <input
+                    id="input-transfer-client"
+                    type="text"
+                    required
+                    placeholder="Nombre del Cliente pagador..."
+                    value={transferClientName}
+                    onFocus={() => setShowTransferClientSuggestions(true)}
+                    onChange={(e) => {
+                      setTransferClientName(e.target.value);
+                      setShowTransferClientSuggestions(true);
+                    }}
+                    className="w-full px-4 py-3 rounded-xl border border-emerald-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium text-slate-800 bg-white"
+                  />
+                  {transferClientName && (
+                    <button
+                      type="button"
+                      onClick={() => setTransferClientName('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs px-1.5 py-0.5 rounded-md hover:bg-slate-100"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Chips clientes frecuentes */}
+                {clientEntities.length > 0 && (
+                  <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                      Clientes:
+                    </span>
+                    {clientEntities.slice(0, 3).map((e) => (
+                      <button
+                        key={e.id}
+                        type="button"
+                        onClick={() => {
+                          setTransferClientName(e.name);
+                          setShowTransferClientSuggestions(false);
+                        }}
+                        className={`px-2 py-0.8 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                          transferClientName === e.name
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-slate-50 hover:bg-emerald-50 text-slate-700 border-slate-200/80'
+                        }`}
+                      >
+                        {e.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Dropdown clientes */}
+                {showTransferClientSuggestions && filteredTransferClients.length > 0 && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowTransferClientSuggestions(false)} />
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl z-20 max-h-48 overflow-y-auto p-1.5 animate-in fade-in">
+                      <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                        Clientes Registrados
+                      </div>
+                      {filteredTransferClients.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setTransferClientName(item.name);
+                            setShowTransferClientSuggestions(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-emerald-50 hover:text-emerald-800 text-slate-800 rounded-xl transition-colors flex items-center justify-between cursor-pointer"
+                        >
+                          <span className="truncate">{item.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* PROVEEDOR (DESTINO) */}
+              <div className="relative">
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <div className="w-2 h-2 rounded-full bg-rose-500" />
+                  <span className="text-rose-700 font-bold">Proveedor (Destino / Egreso) *</span>
+                </label>
+
+                <div className="relative">
+                  <input
+                    id="input-transfer-provider"
+                    type="text"
+                    required
+                    placeholder="Nombre del Proveedor receptor..."
+                    value={transferProviderName}
+                    onFocus={() => setShowTransferProviderSuggestions(true)}
+                    onChange={(e) => {
+                      setTransferProviderName(e.target.value);
+                      setShowTransferProviderSuggestions(true);
+                    }}
+                    className="w-full px-4 py-3 rounded-xl border border-rose-200 focus:ring-2 focus:ring-rose-500 outline-none text-sm font-medium text-slate-800 bg-white"
+                  />
+                  {transferProviderName && (
+                    <button
+                      type="button"
+                      onClick={() => setTransferProviderName('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs px-1.5 py-0.5 rounded-md hover:bg-slate-100"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Chips proveedores frecuentes */}
+                {providerEntities.length > 0 && (
+                  <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                      Proveedores:
+                    </span>
+                    {providerEntities.slice(0, 3).map((e) => (
+                      <button
+                        key={e.id}
+                        type="button"
+                        onClick={() => {
+                          setTransferProviderName(e.name);
+                          setShowTransferProviderSuggestions(false);
+                        }}
+                        className={`px-2 py-0.8 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                          transferProviderName === e.name
+                                ? 'bg-rose-600 text-white border-rose-600'
+                                : 'bg-slate-50 hover:bg-rose-50 text-slate-700 border-slate-200/80'
+                        }`}
+                      >
+                        {e.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Dropdown proveedores */}
+                {showTransferProviderSuggestions && filteredTransferProviders.length > 0 && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowTransferProviderSuggestions(false)} />
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl z-20 max-h-48 overflow-y-auto p-1.5 animate-in fade-in">
+                      <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                        Proveedores Registrados
+                      </div>
+                      {filteredTransferProviders.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setTransferProviderName(item.name);
+                            setShowTransferProviderSuggestions(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-rose-50 hover:text-rose-800 text-slate-800 rounded-xl transition-colors flex items-center justify-between cursor-pointer"
+                        >
+                          <span className="truncate">{item.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Notas Adicionales */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
+                Notas o Referencia de Transferencia (Opcional)
+              </label>
+              <input
+                type="text"
+                placeholder="# comprobante, ref bancaria o notas..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-purple-500 outline-none text-sm font-medium text-slate-800"
+              />
+            </div>
+
+            {/* Botón de Guardar Transferencia Directa */}
+            <div className="pt-2">
+              <button
+                type="submit"
+                id="btn-submit-transfer"
+                className="w-full bg-purple-700 text-white py-4 rounded-2xl font-bold text-base hover:bg-purple-800 active:scale-[0.99] transition-all shadow-md shadow-purple-600/20 flex items-center justify-center gap-2.5 cursor-pointer"
+              >
+                <Repeat className="w-5 h-5" />
+                <span>Registrar Transferencia Directa (2 Movimientos Vinculados)</span>
+              </button>
+            </div>
+          </div>
+        )}
           </form>
 
           {/* Toast de Éxito */}
@@ -766,27 +1231,68 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
               {dayRecords.slice(0, 5).map((r) => (
                 <div 
                   key={r.id} 
-                  className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs"
+                  onClick={() => onViewRecord && onViewRecord(r)}
+                  className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-blue-50/50 border border-slate-100 text-xs transition-colors cursor-pointer group"
+                  title="Toca para ver la información completa"
                 >
                   <div className="flex items-center gap-2.5">
-                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
+                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
                       r.type === 'sale' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                     }`}>
                       {r.type === 'sale' ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                     </div>
                     <div>
-                      <p className="font-bold text-slate-800">{r.category}</p>
-                      {r.description && <p className="text-[10px] text-slate-500 truncate max-w-[120px]">{r.description}</p>}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-bold text-slate-800 group-hover:text-blue-700 transition-colors">{r.category}</p>
+                        {r.paymentMethod === 'direct_transfer' && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded-md">
+                            <Repeat className="w-2.5 h-2.5" /> Transferencia
+                          </span>
+                        )}
+                      </div>
+                      {r.description && <p className="text-[10px] text-slate-500 truncate max-w-[140px]">{r.description}</p>}
+                      {r.entityName && <p className="text-[9px] text-slate-400 truncate max-w-[140px]">{r.entityName}</p>}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <span className={`font-bold ${r.type === 'sale' ? 'text-emerald-600' : 'text-rose-600'}`}>
                       {r.type === 'sale' ? '+' : '-'}{formatCurrency(r.amount, currencySymbol)}
                     </span>
+                    {onViewRecord && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewRecord(r);
+                        }}
+                        className="text-slate-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition-colors cursor-pointer"
+                        title="Ver ficha completa"
+                        aria-label="Ver ficha del registro"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {onOpenInquiry && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenInquiry(r);
+                        }}
+                        className="text-slate-400 hover:text-purple-600 p-1 rounded hover:bg-purple-50 transition-colors cursor-pointer"
+                        title="Enviar consulta o mensaje sobre este registro"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     {onEditRecord && (
                       <button
-                        onClick={() => onEditRecord(r)}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditRecord(r);
+                        }}
                         className="text-slate-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition-colors cursor-pointer"
                         title="Editar registro"
                       >
@@ -795,7 +1301,11 @@ export const DataEntryForm: React.FC<DataEntryFormProps> = ({
                     )}
                     {isAdmin && (
                       <button
-                        onClick={() => onDeleteRecord(r.id)}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteRecord(r.id);
+                        }}
                         className="text-slate-300 hover:text-rose-500 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
                         title="Eliminar registro (Solo Administrador)"
                       >

@@ -23,7 +23,7 @@ import { formatDisplayDate } from '../utils/dateUtils';
 interface DataImportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportSuccess: (importedRecords: FinancialRecord[], mode: 'merge' | 'replace', discoveredConcepts: string[], discoveredEntities: string[]) => void;
+  onImportSuccess: (importedRecords: FinancialRecord[], mode: 'merge' | 'replace', discoveredConcepts: string[], discoveredEntities: string[]) => Promise<void> | void;
   currentUser: AppUser;
   currencySymbol: string;
   existingCount: number;
@@ -39,6 +39,7 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
 }) => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
@@ -83,18 +84,28 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
     setIsDragging(false);
   };
 
-  const handleConfirmImport = () => {
-    if (!importResult || importResult.records.length === 0) return;
-    onImportSuccess(
-      importResult.records, 
-      importMode,
-      importResult.discoveredConcepts,
-      importResult.discoveredEntities
-    );
-    onClose();
+  const handleConfirmImport = async () => {
+    if (!importResult || importResult.records.length === 0 || isSaving) return;
+    setIsSaving(true);
+    setErrorMessage('');
+    try {
+      await onImportSuccess(
+        importResult.records, 
+        importMode,
+        importResult.discoveredConcepts,
+        importResult.discoveredEntities
+      );
+      onClose();
+    } catch (err: any) {
+      console.error('Import confirmation error:', err);
+      setErrorMessage(err.message || 'Error al guardar los datos en Firestore. Verifica la conexión e inténtalo nuevamente.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleResetFile = () => {
+    if (isSaving) return;
     setSelectedFile(null);
     setImportResult(null);
     setErrorMessage('');
@@ -373,7 +384,10 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
         <div className="px-6 sm:px-8 py-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/70">
           <button
             onClick={onClose}
-            className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-xl transition-colors cursor-pointer"
+            disabled={isSaving}
+            className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-colors ${
+              isSaving ? 'text-slate-400 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-200/70 cursor-pointer'
+            }`}
           >
             Cancelar
           </button>
@@ -382,10 +396,32 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
             <button
               id="btn-confirm-import-data"
               onClick={handleConfirmImport}
-              className="px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-md shadow-emerald-200 flex items-center gap-2 cursor-pointer"
+              disabled={isSaving}
+              className={`px-6 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md flex items-center gap-2 ${
+                isSaving
+                  ? 'bg-emerald-400 cursor-not-allowed opacity-90'
+                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200 cursor-pointer'
+              }`}
             >
-              <Upload className="w-4 h-4" />
-              <span>Importar {importResult.validRows} Registros</span>
+              {isSaving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>
+                    {importMode === 'replace'
+                      ? 'Reemplazando registros en la base de datos...'
+                      : 'Guardando registros en la base de datos...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  <span>
+                    {importMode === 'replace'
+                      ? `Reemplazar con ${importResult.validRows} Registros`
+                      : `Importar ${importResult.validRows} Registros`}
+                  </span>
+                </>
+              )}
             </button>
           )}
         </div>

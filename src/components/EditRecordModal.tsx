@@ -20,7 +20,8 @@ import {
   History,
   CheckCircle2,
   Building2,
-  Sparkles
+  Sparkles,
+  Check
 } from 'lucide-react';
 import { 
   FinancialRecord, 
@@ -29,7 +30,9 @@ import {
   AppUser, 
   DEFAULT_SALE_CATEGORIES, 
   DEFAULT_EXPENSE_CATEGORIES, 
-  PAYMENT_METHODS 
+  PAYMENT_METHODS,
+  ReviewStatus,
+  RecordMessage
 } from '../types';
 import { SavedItem } from '../data/savedItemsData';
 import { formatDisplayDate } from '../utils/dateUtils';
@@ -47,6 +50,8 @@ interface EditRecordModalProps {
   savedEntities?: SavedItem[];
   onRecordConcept?: (name: string, type: TransactionType) => void;
   onRecordEntity?: (name: string, type: TransactionType) => void;
+  messages?: RecordMessage[];
+  onMarkMessagesAsRead?: (recordId: string) => Promise<void> | void;
 }
 
 export const EditRecordModal: React.FC<EditRecordModalProps> = ({
@@ -61,18 +66,20 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
   savedEntities = [],
   onRecordConcept,
   onRecordEntity,
+  messages = [],
+  onMarkMessagesAsRead,
 }) => {
-  if (!isOpen || !record) return null;
-
-  const [type, setType] = useState<TransactionType>(record.type);
-  const [date, setDate] = useState<string>(record.date);
-  const [amount, setAmount] = useState<string>(record.amount.toString());
-  const [category, setCategory] = useState<string>(record.category);
-  const [description, setDescription] = useState<string>(record.description || '');
-  const [entityName, setEntityName] = useState<string>(record.entityName || '');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(record.paymentMethod);
-  const [notes, setNotes] = useState<string>(record.notes || '');
-  const [editReason, setEditReason] = useState<string>(record.editReason || '');
+  const [type, setType] = useState<TransactionType>(record?.type || 'sale');
+  const [date, setDate] = useState<string>(record?.date || '');
+  const [amount, setAmount] = useState<string>(record ? record.amount.toString() : '');
+  const [category, setCategory] = useState<string>(record?.category || DEFAULT_SALE_CATEGORIES[0]);
+  const [description, setDescription] = useState<string>(record?.description || '');
+  const [entityName, setEntityName] = useState<string>(record?.entityName || '');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(record?.paymentMethod || 'cash');
+  const [notes, setNotes] = useState<string>(record?.notes || '');
+  const [editReason, setEditReason] = useState<string>(record?.editReason || '');
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatus>(record?.reviewStatus || 'sin_asignar');
+  const [autoResolveMessages, setAutoResolveMessages] = useState<boolean>(true);
 
   // Estados de Seguridad y PIN
   const [pinInput, setPinInput] = useState<string>('');
@@ -93,12 +100,39 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
       setPaymentMethod(record.paymentMethod);
       setNotes(record.notes || '');
       setEditReason('');
+      setReviewStatus(record.reviewStatus || 'sin_asignar');
+      setAutoResolveMessages(true);
       setPinInput('');
       setPinError('');
       setFormError('');
       setIsSavedSuccess(false);
     }
   }, [record]);
+
+  // Mensajes asociados al registro
+  const associatedMessages = useMemo(() => {
+    if (!record || !messages) return [];
+    return messages.filter(m => m.recordId === record.id);
+  }, [record, messages]);
+
+  const unreadAssociatedCount = useMemo(() => {
+    return associatedMessages.filter(m => !m.read).length;
+  }, [associatedMessages]);
+
+  // Filtrar sugerencias de catálogos
+  const conceptSuggestions = useMemo(() => {
+    const list = savedConcepts.filter(c => c.type === type || c.type === 'both');
+    if (!description.trim()) return list.slice(0, 5);
+    return list.filter(c => c.name.toLowerCase().includes(description.toLowerCase())).slice(0, 5);
+  }, [savedConcepts, type, description]);
+
+  const entitySuggestions = useMemo(() => {
+    const list = savedEntities.filter(e => e.type === type || e.type === 'both');
+    if (!entityName.trim()) return list.slice(0, 5);
+    return list.filter(e => e.name.toLowerCase().includes(entityName.toLowerCase())).slice(0, 5);
+  }, [savedEntities, type, entityName]);
+
+  if (!isOpen || !record) return null;
 
   // Manejar cambio de tipo y actualizar categoría sugerida si es necesario
   const handleTypeChange = (newType: TransactionType) => {
@@ -119,19 +153,6 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
 
   // Categorías según el tipo activo
   const availableCategories = type === 'sale' ? DEFAULT_SALE_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
-
-  // Filtrar sugerencias de catálogos
-  const conceptSuggestions = useMemo(() => {
-    const list = savedConcepts.filter(c => c.type === type || c.type === 'both');
-    if (!description.trim()) return list.slice(0, 5);
-    return list.filter(c => c.name.toLowerCase().includes(description.toLowerCase())).slice(0, 5);
-  }, [savedConcepts, type, description]);
-
-  const entitySuggestions = useMemo(() => {
-    const list = savedEntities.filter(e => e.type === type || e.type === 'both');
-    if (!entityName.trim()) return list.slice(0, 5);
-    return list.filter(e => e.name.toLowerCase().includes(entityName.toLowerCase())).slice(0, 5);
-  }, [savedEntities, type, entityName]);
 
   // Validar PIN de seguridad
   const validatePin = (): boolean => {
@@ -166,7 +187,7 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
   };
 
   // Guardar Cambios
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
     setPinError('');
@@ -192,6 +213,9 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
       if (!isPinValid) return;
     }
 
+    const isStatusChanged = reviewStatus !== (record.reviewStatus || 'resuelto');
+    const nowISO = new Date().toISOString();
+
     const updatedRecord: FinancialRecord = {
       ...record,
       type,
@@ -202,11 +226,14 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
       entityName: entityName.trim() || undefined,
       paymentMethod,
       notes: notes.trim() || undefined,
-      lastEditedAt: new Date().toISOString(),
+      lastEditedAt: nowISO,
       lastEditedBy: currentUser.id,
       lastEditedByName: currentUser.name,
       editCount: (record.editCount || 0) + 1,
       editReason: editReason.trim() || undefined,
+      reviewStatus,
+      lastReviewedBy: isStatusChanged ? currentUser.name : (record.lastReviewedBy || currentUser.name),
+      lastReviewedAt: isStatusChanged ? nowISO : (record.lastReviewedAt || nowISO),
     };
 
     // Registrar en catálogo si es nuevo
@@ -215,6 +242,15 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
     }
     if (entityName.trim() && onRecordEntity) {
       onRecordEntity(entityName.trim(), type);
+    }
+
+    // Si se pasa a resuelto y está activada la opción de marcar mensajes como leídos
+    if (reviewStatus === 'resuelto' && autoResolveMessages && onMarkMessagesAsRead) {
+      try {
+        await onMarkMessagesAsRead(record.id);
+      } catch (err) {
+        console.warn('Error al marcar mensajes asociados como leídos:', err);
+      }
     }
 
     onSave(updatedRecord);
@@ -270,6 +306,96 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
         {/* Cuerpo del Formulario */}
         <form onSubmit={handleSave} className="p-6 sm:p-8 overflow-y-auto space-y-6 flex-1">
           
+          {/* SECCIÓN DE ESTADO DE REVISIÓN Y CONSULTA */}
+          <div className="bg-slate-50/90 rounded-2xl p-4 border border-slate-200/90 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                <span>Estado de Revisión del Registro</span>
+              </label>
+              {record.lastReviewedBy && (
+                <span className="text-[11px] text-slate-500">
+                  Última revisión: <strong className="text-slate-700">{record.lastReviewedBy}</strong>
+                  {record.lastReviewedAt && ` (${new Date(record.lastReviewedAt).toLocaleDateString()})`}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={() => setReviewStatus('sin_asignar')}
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  reviewStatus === 'sin_asignar'
+                    ? 'bg-slate-700 text-white border-slate-800 shadow-sm ring-2 ring-slate-300'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${reviewStatus === 'sin_asignar' ? 'bg-white' : 'bg-slate-400'}`} />
+                <span>⚪ Sin asignar</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReviewStatus('pendiente')}
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  reviewStatus === 'pendiente'
+                    ? 'bg-amber-500 text-white border-amber-600 shadow-sm ring-2 ring-amber-200'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50 hover:border-amber-300'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${reviewStatus === 'pendiente' ? 'bg-white animate-ping' : 'bg-amber-500'}`} />
+                <span>🟡 Pendiente</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReviewStatus('en_revision')}
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  reviewStatus === 'en_revision'
+                    ? 'bg-blue-600 text-white border-blue-700 shadow-sm ring-2 ring-blue-200'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-blue-50 hover:border-blue-300'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${reviewStatus === 'en_revision' ? 'bg-white' : 'bg-blue-500'}`} />
+                <span>🔵 En Revisión</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReviewStatus('resuelto')}
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  reviewStatus === 'resuelto'
+                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm ring-2 ring-emerald-200'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:border-emerald-300'
+                }`}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>🟢 Resuelto</span>
+              </button>
+            </div>
+
+            {/* Opción de resolver consultas asociadas si se cambia a Resuelto */}
+            {reviewStatus === 'resuelto' && associatedMessages.length > 0 && (
+              <div className="pt-2.5 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-slate-700 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={autoResolveMessages}
+                    onChange={(e) => setAutoResolveMessages(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span>Marcar mensajes de consulta asociados como leídos</span>
+                </label>
+                {unreadAssociatedCount > 0 && (
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full inline-block">
+                    {unreadAssociatedCount} pendiente{unreadAssociatedCount > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Selector de Tipo (Ingreso vs Gasto) */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">

@@ -18,7 +18,11 @@ import {
   Building2,
   RotateCcw,
   Edit3,
-  Clock
+  Clock,
+  MessageSquare,
+  Repeat,
+  CheckCircle2,
+  Eye
 } from 'lucide-react';
 import { FinancialRecord, PAYMENT_METHODS, AppUser } from '../types';
 import { formatDisplayDate } from '../utils/dateUtils';
@@ -30,9 +34,11 @@ interface DailyLogTableProps {
   currencySymbol: string;
   onDeleteRecord: (id: string) => void;
   onEditRecord?: (record: FinancialRecord) => void;
+  onViewRecord?: (record: FinancialRecord) => void;
   currentUser: AppUser;
   users?: AppUser[];
   onOpenImportModal?: () => void;
+  onOpenInquiry?: (record: FinancialRecord) => void;
 }
 
 export const DailyLogTable: React.FC<DailyLogTableProps> = ({
@@ -40,9 +46,11 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
   currencySymbol,
   onDeleteRecord,
   onEditRecord,
+  onViewRecord,
   currentUser,
   users = [],
   onOpenImportModal,
+  onOpenInquiry,
 }) => {
   const safeRecords = records || [];
   const safeUsers = users || [];
@@ -52,6 +60,7 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
   const [filterConcept, setFilterConcept] = useState<string>('all');
   const [filterEntity, setFilterEntity] = useState<string>('all');
   const [filterUser, setFilterUser] = useState<string>('all');
+  const [filterReviewStatus, setFilterReviewStatus] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
 
   const isAdmin = currentUser.role === 'admin';
@@ -84,6 +93,10 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
     if (filterConcept !== 'all' && r.description !== filterConcept) return false;
     if (filterEntity !== 'all' && r.entityName !== filterEntity) return false;
     if (filterUser !== 'all' && r.createdBy !== filterUser) return false;
+    if (filterReviewStatus !== 'all') {
+      const currentStatus = r.reviewStatus || 'sin_asignar';
+      if (currentStatus !== filterReviewStatus) return false;
+    }
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
       const matchCategory = r.category?.toLowerCase().includes(q);
@@ -123,6 +136,7 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
     filterConcept !== 'all',
     filterEntity !== 'all',
     filterUser !== 'all',
+    filterReviewStatus !== 'all',
     searchQuery.trim() !== '',
   ].filter(Boolean).length;
 
@@ -132,6 +146,7 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
     setFilterConcept('all');
     setFilterEntity('all');
     setFilterUser('all');
+    setFilterReviewStatus('all');
     setSearchQuery('');
   };
 
@@ -246,6 +261,20 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
             ))}
           </select>
 
+          {/* Filtro por Estado de Revisión */}
+          <select
+            aria-label="Filtrar por estado de revisión"
+            value={filterReviewStatus}
+            onChange={(e) => setFilterReviewStatus(e.target.value)}
+            className="px-3 py-2 text-xs font-semibold bg-slate-50/70 border border-slate-200 rounded-xl text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+          >
+            <option value="all">Revisión: Todos</option>
+            <option value="sin_asignar">⚪ Sin asignar (Neutral)</option>
+            <option value="pendiente">🟡 Pendientes</option>
+            <option value="en_revision">🔵 En Revisión</option>
+            <option value="resuelto">🟢 Resueltos</option>
+          </select>
+
           {/* Orden */}
           <select
             aria-label="Ordenar registros"
@@ -307,6 +336,7 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
                   <th className="py-4 px-5">Categoría</th>
                   <th className="py-4 px-5">Cliente / Proveedor</th>
                   <th className="py-4 px-5">Medio de Pago</th>
+                  <th className="py-4 px-5">Estado</th>
                   <th className="py-4 px-5">Registrado por</th>
                   <th className="py-4 px-5 text-right">Monto</th>
                   <th className="py-4 px-5 text-center">Acciones</th>
@@ -318,7 +348,12 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
                   const isSale = r.type === 'sale';
 
                   return (
-                    <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr 
+                      key={r.id} 
+                      onClick={() => onViewRecord && onViewRecord(r)}
+                      className="hover:bg-blue-50/40 transition-colors cursor-pointer group"
+                      title="Toca para ver la información completa de este registro"
+                    >
                       {/* Fecha */}
                       <td className="py-4 px-5 whitespace-nowrap text-slate-700 font-semibold">
                         {formatDisplayDate(r.date, true)}
@@ -382,14 +417,97 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
 
                       {/* Método de Pago */}
                       <td className="py-4 px-5 whitespace-nowrap text-slate-500 text-[11px]">
-                        {paymentLabel}
+                        {r.paymentMethod === 'direct_transfer' ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                              <Repeat className="w-2.5 h-2.5 text-purple-600" />
+                              <span>Transferencia Directa</span>
+                            </span>
+                            {r.linkedEntityName && (
+                              <span className="text-[10px] text-purple-600/90 font-medium">
+                                {isSale ? `Hacia: ${r.linkedEntityName}` : `Desde: ${r.linkedEntityName}`}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span>{paymentLabel}</span>
+                        )}
                       </td>
 
-                      {/* Registrado por */}
+                      {/* Estado de Revisión */}
                       <td className="py-4 px-5 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                          <User className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="font-semibold">{r.createdByName || 'Operador'}</span>
+                        {r.reviewStatus === 'pendiente' ? (
+                          <span 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditRecord ? onEditRecord(r) : onViewRecord && onViewRecord(r);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shadow-2xs"
+                            title={`Revisión Pendiente${r.lastReviewedBy ? ` (Última por ${r.lastReviewedBy})` : ''}. Clic para editar`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            <span>🟡 Pendiente</span>
+                          </span>
+                        ) : r.reviewStatus === 'en_revision' ? (
+                          <span 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditRecord ? onEditRecord(r) : onViewRecord && onViewRecord(r);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-300 hover:bg-blue-100 transition-colors cursor-pointer shadow-2xs"
+                            title={`En Revisión${r.lastReviewedBy ? ` por ${r.lastReviewedBy}` : ''}. Clic para editar`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                            <span>🔵 En Revisión</span>
+                          </span>
+                        ) : r.reviewStatus === 'resuelto' ? (
+                          <span 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditRecord ? onEditRecord(r) : onViewRecord && onViewRecord(r);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 transition-colors cursor-pointer shadow-2xs"
+                            title={`Resuelto${r.lastReviewedBy ? ` por ${r.lastReviewedBy}` : ''}. Clic para editar`}
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>🟢 Resuelto</span>
+                          </span>
+                        ) : (
+                          <span 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditRecord ? onEditRecord(r) : onViewRecord && onViewRecord(r);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 transition-colors cursor-pointer shadow-2xs"
+                            title="Sin asignar / Neutral. Clic para editar"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                            <span>⚪ Sin asignar</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Registrado por y Botón de Consulta Rápida */}
+                      <td className="py-4 px-5 whitespace-nowrap">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-slate-700">
+                            <User className="w-3.5 h-3.5 text-slate-400" />
+                            <span className="font-semibold">{r.createdByName || 'Operador'}</span>
+                          </div>
+                          {onOpenInquiry && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenInquiry(r);
+                              }}
+                              className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                              title={`Consultar a ${r.createdByName || 'Operador'} sobre este movimiento`}
+                            >
+                              <MessageSquare className="w-2.5 h-2.5" />
+                              <span>Consultar a {r.createdByName ? r.createdByName.split(' ')[0] : 'Operador'}</span>
+                            </button>
+                          )}
                         </div>
                       </td>
 
@@ -400,12 +518,43 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
                         </span>
                       </td>
 
-                      {/* Acciones: Editar y Borrar */}
+                      {/* Acciones: Ver Ficha, Consultar, Editar y Borrar */}
                       <td className="py-4 px-5 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
+                          {onViewRecord && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onViewRecord(r);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
+                              title="Ver información completa (Ficha detallada)"
+                              aria-label="Ver ficha del registro"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          )}
+                          {onOpenInquiry && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenInquiry(r);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors cursor-pointer"
+                              title={`Consultar o enviar mensaje a ${r.createdByName || 'Operador'}`}
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                            </button>
+                          )}
                           {onEditRecord && (
                             <button
-                              onClick={() => onEditRecord(r)}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditRecord(r);
+                              }}
                               className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
                               title="Editar este registro"
                             >
@@ -414,7 +563,9 @@ export const DailyLogTable: React.FC<DailyLogTableProps> = ({
                           )}
                           {isAdmin && (
                             <button
-                              onClick={() => {
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 if (window.confirm('¿Seguro que deseas eliminar este registro de la base de datos?')) {
                                   onDeleteRecord(r.id);
                                 }
